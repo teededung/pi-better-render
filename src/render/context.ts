@@ -34,6 +34,8 @@ export interface RenderContext {
 	listDepth: number;
 	/** Applied to plain text leaves (e.g. dim color inside block quotes). */
 	textStyle?: (text: string) => string;
+	/** True while rendering the label of a Markdown link so nested tokens keep `mdLink` color. */
+	inLink?: boolean;
 }
 
 export const noMath: MathRenderer = {

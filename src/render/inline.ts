@@ -1,6 +1,6 @@
 import { hyperlink, renderLatex } from "@earendil-works/pi-tui";
 import type { RenderContext } from "./context.ts";
-import { decodeEntities, plainText } from "./util.ts";
+import { decodeEntities } from "./util.ts";
 
 /** Unicode approximation used while images are unavailable. */
 export function latexFallback(tex: string, display = false): string {
@@ -40,21 +40,22 @@ function renderInlineToken(token: any, ctx: RenderContext): string {
 		case "del":
 			return style.strike(renderInline(token.tokens, ctx));
 		case "codespan":
-			return style.fg("mdCode", decodeEntities(token.text));
+			return ctx.inLink ? decodeEntities(token.text) : style.fg("mdCode", decodeEntities(token.text));
 		case "br":
 			return "\n";
 		case "link": {
-			const label = renderInline(token.tokens, ctx) || token.href;
+			const label = renderInline(token.tokens, { ...ctx, textStyle: undefined, inLink: true }) || token.href;
 			const styled = style.fg("mdLink", style.underline(label));
 			if (!token.href || token.href.startsWith("#")) return styled;
-			const shown = plainText(token.tokens);
-			const url = shown === token.href || `mailto:${shown}` === token.href ? "" : style.fg("mdLinkUrl", ` ‹${token.href}›`);
-			return hyperlink(styled, token.href) + (shown.length > 0 && token.href.length <= 60 ? url : "");
+			return hyperlink(styled, token.href);
 		}
 		case "image":
 			return style.fg("muted", `[image: ${token.text || token.href}]`);
-		case "html":
-			return style.fg("muted", token.text ?? token.raw);
+		case "html": {
+			const raw = String(token.text ?? token.raw ?? "");
+			if (/^<br\s*\/?>$/i.test(raw.trim())) return "\n";
+			return style.fg("muted", raw);
+		}
 		case "inlineMath": {
 			const image = ctx.math.inline(token.text, token.display, ctx.streaming);
 			if (image) return image;

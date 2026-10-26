@@ -57,26 +57,30 @@ export function renderBlock(token: any, ctx: RenderContext): string[] {
 
 function renderHeading(token: any, ctx: RenderContext): string[] {
 	const { style } = ctx;
-	const content = renderInline(token.tokens, ctx);
 	const width = ctx.width;
+	const textStyle =
+		token.depth <= 3
+			? (t: string) => style.bold(style.fg("mdHeading", t))
+			: token.depth === 4
+				? (t: string) => style.bold(style.fg("accent", t))
+				: token.depth === 5
+					? (t: string) => style.bold(t)
+					: (t: string) => style.italic(style.fg("muted", t));
+	const content = renderInline(token.tokens, { ...ctx, textStyle });
 	switch (token.depth) {
 		case 1: {
-			const lines = wrap(style.bold(style.fg("mdHeading", content)), width);
+			const lines = wrap(textStyle(content), width);
 			return [...lines, style.fg("mdHeading", "━".repeat(width))];
 		}
 		case 2: {
-			const lines = wrap(style.bold(style.fg("mdHeading", content)), width);
+			const lines = wrap(textStyle(content), width);
 			const underline = Math.min(width, Math.max(...lines.map(visibleWidth)) + 2);
 			return [...lines, style.fg("mdHr", "─".repeat(underline))];
 		}
 		case 3:
-			return wrap(style.fg("accent", "▍") + " " + style.bold(style.fg("mdHeading", content)), width);
-		case 4:
-			return wrap(style.bold(style.fg("accent", content)), width);
-		case 5:
-			return wrap(style.bold(content), width);
+			return wrap(style.fg("accent", "▍") + " " + textStyle(content), width);
 		default:
-			return wrap(style.italic(style.fg("muted", content)), width);
+			return wrap(textStyle(content), width);
 	}
 }
 

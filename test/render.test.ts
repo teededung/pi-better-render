@@ -202,3 +202,22 @@ test("incremental lexing matches a full lex at every streaming step", async () =
 		assert.deepEqual(final, strip(lex(doc, false)));
 	}
 });
+
+test("links render as clean OSC 8 hyperlinks without trailing ‹url› suffix or mdCode override", () => {
+	const style = createStyle(darkTheme(), () => undefined);
+	const lines = renderMarkdown(
+		"See [`AGENTS.md`](file:///Users/test/Repo/AGENTS.md) and [skills](file:///Users/test/.agents/skills).",
+		100,
+		{ style, math: noMath, streaming: false },
+	);
+	const joined = lines.join("\n");
+	assert.ok(!joined.includes("‹file:///"), "must not append trailing ‹url› suffix");
+	assert.ok(joined.includes("\x1b]8;;file:///Users/test/Repo/AGENTS.md\x1b\\"), "includes OSC 8 hyperlink");
+});
+
+test("inline <br> tags break lines inside table cells and paragraphs", () => {
+	const lines = render("| col1 | col2 |\n|---|---|\n| a<br>b | c<br/>d |");
+	assert.ok(lines.some((l) => l.includes("│ a ") && l.includes("│ c ")));
+	assert.ok(lines.some((l) => l.includes("│ b ") && l.includes("│ d ")));
+});
+

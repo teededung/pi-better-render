@@ -15,11 +15,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/JeffeyChou/pi-better-render.git"
+    "url": "git+https://github.com/teededung/pi-better-render.git"
   },
-  "homepage": "https://github.com/JeffeyChou/pi-better-render#readme",
+  "homepage": "https://github.com/teededung/pi-better-render#readme",
   "bugs": {
-    "url": "https://github.com/JeffeyChou/pi-better-render/issues"
+    "url": "https://github.com/teededung/pi-better-render/issues"
   },
   "type": "module",
   "main": "./src/index.ts",
