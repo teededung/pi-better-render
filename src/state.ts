@@ -23,8 +23,11 @@ export function bumpVersion(): void {
 
 let renderRequester: (() => void) | undefined;
 
-export function setRenderRequester(fn: (() => void) | undefined): void {
+export function setRenderRequester(fn: (() => void) | undefined): () => void {
 	renderRequester = fn;
+	return () => {
+		if (fn && renderRequester === fn) renderRequester = undefined;
+	};
 }
 
 /** Ask the TUI for a new frame (used after asynchronous work finishes). */

@@ -15,62 +15,13 @@ import { createMathRenderer, mathStats, clearFormulaCache } from "./math/formula
 import { deleteImages, forgetImages, imageMode, installFrameHook } from "./math/kitty.ts";
 import { loadMathJax, mathjaxBundled, mathjaxError, mathjaxReady } from "./math/mathjax.ts";
 import { detectTexBackend } from "./math/tex-backend.ts";
-import { applyPatch, removePatch } from "./patch.ts";
+import { applyPatch, type PatchHandle } from "./patch.ts";
 import { clearLexCache } from "./render/lexer.ts";
 import { depsDir, mermaidEngine } from "./render/mermaid.ts";
 import { cacheStats, clearBlockCache, RichMarkdown } from "./render/rich-markdown.ts";
 import { containsRenderArtifacts, sanitizeMessages } from "./sanitize.ts";
 import { bumpVersion, type MathMode, setRenderRequester, state } from "./state.ts";
 import { createStyle, plainStyle, type Style } from "./style.ts";
-
-let ui: ExtensionContext["ui"] | undefined;
-let tui: { mode?: string; requestRender?: () => void; invalidate?: () => void; terminal?: { write(data: string): void } } | undefined;
-let uninstallFrameHook: (() => void) | undefined;
-
-function currentStyle(): Style {
-	const theme = ui?.theme;
-	if (!theme) return plainStyle();
-	let highlight: Style["highlight"] = () => undefined;
-	try {
-		const md = getMarkdownTheme();
-		if (md.highlightCode) highlight = (code, lang) => md.highlightCode!(code, lang);
-	} catch {
-		// no highlighting available
-	}
-	return createStyle(theme, highlight);
-}
-
-let lastStyle: Style = plainStyle();
-const math = createMathRenderer(() => lastStyle.mathColor);
-
-/** Re-render every message (after a mode switch, theme change or MathJax finishing to load). */
-function refreshAll(): void {
-	bumpVersion();
-	try {
-		tui?.invalidate?.();
-		tui?.requestRender?.();
-	} catch {
-		// TUI gone (shutdown)
-	}
-}
-
-/** Grab pi's TUI instance through a widget factory, then remove the widget again. */
-function captureTui(ctx: ExtensionContext): void {
-	const key = "pi-better-render:probe";
-	try {
-		ctx.ui.setWidget(key, (instance) => {
-			tui = instance;
-			return { render: () => [], invalidate() {} };
-		});
-		ctx.ui.setWidget(key, undefined);
-	} catch {
-		tui = undefined;
-	}
-	setRenderRequester(() => tui?.requestRender?.());
-	// Send formula images along with the frames that display them (and again after a full clear).
-	uninstallFrameHook?.();
-	uninstallFrameHook = tui?.terminal && typeof tui.terminal.write === "function" ? installFrameHook(tui.terminal) : undefined;
-}
 
 /**
  * Forget everything rendered: the next frames re-rasterize and re-send what is
@@ -94,12 +45,13 @@ function debugLog(line: string): void {
 	}
 }
 
-function statusText(): string {
+function statusText(patchError?: string): string {
 	const tex = detectTexBackend();
 	const lookups = cacheStats.hits + cacheStats.misses;
 	const avg = mathStats.rendered > 0 ? (mathStats.totalMs / mathStats.rendered).toFixed(1) : "–";
+	const richStatus = patchError ? `incompatible (${patchError})` : state.enabled ? "on" : "off";
 	return [
-		`rich markdown: ${state.enabled ? "on" : "off"}   math: ${state.math}   line numbers: ${state.lineNumbers ? "on" : "off"}   mermaid: ${state.mermaid ? "on" : "off"}`,
+		`rich markdown: ${richStatus}   math: ${state.math}   line numbers: ${state.lineNumbers ? "on" : "off"}   mermaid: ${state.mermaid ? "on" : "off"}`,
 		`math engine: ${mathjaxReady() ? `MathJax${mathjaxBundled() ? " (bundled)" : ""} + resvg` : mathjaxError() ? `unavailable (${mathjaxError()})` : "loading…"}`,
 		`TeX fallback: ${tex ? tex.name : "none"}   images: ${imageStatus()}`,
 		`text fonts: ${textFontStatus()}`,
@@ -137,12 +89,65 @@ const COMMANDS = [
 ];
 
 export default function piBetterRender(pi: ExtensionAPI): void {
+	let ui: ExtensionContext["ui"] | undefined;
+	let tui: { mode?: string; requestRender?: () => void; invalidate?: () => void; terminal?: { write(data: string): void } } | undefined;
+	let uninstallFrameHook: (() => void) | undefined;
+	let releasePatch: (() => void) | undefined;
+	let releaseRequester: (() => void) | undefined;
+	let patchError: string | undefined;
+	let lastStyle: Style = plainStyle();
+	const math = createMathRenderer(() => lastStyle.mathColor);
+
+	function currentStyle(): Style {
+		const theme = ui?.theme;
+		if (!theme) return plainStyle();
+		let highlight: Style["highlight"] = () => undefined;
+		try {
+			const md = getMarkdownTheme();
+			if (md.highlightCode) highlight = (code, lang) => md.highlightCode!(code, lang);
+		} catch {
+			// no highlighting available
+		}
+		return createStyle(theme, highlight);
+	}
+
+	/** Re-render every message (after a mode switch, theme change or MathJax finishing to load). */
+	function refreshAll(): void {
+		bumpVersion();
+		try {
+			tui?.invalidate?.();
+			tui?.requestRender?.();
+		} catch {
+			// TUI gone (shutdown)
+		}
+	}
+
+	/** Grab pi's TUI instance through a widget factory, then remove the widget again. */
+	function captureTui(ctx: ExtensionContext): void {
+		const key = "pi-better-render:probe";
+		try {
+			ctx.ui.setWidget(key, (instance) => {
+				tui = instance;
+				return { render: () => [], invalidate() {} };
+			});
+			ctx.ui.setWidget(key, undefined);
+		} catch {
+			tui = undefined;
+		}
+		releaseRequester?.();
+		releaseRequester = setRenderRequester(() => tui?.requestRender?.());
+		// Send formula images along with the frames that display them (and again after a full clear).
+		uninstallFrameHook?.();
+		uninstallFrameHook = tui?.terminal && typeof tui.terminal.write === "function" ? installFrameHook(tui.terminal) : undefined;
+	}
+
 	pi.on("session_start", (_event, ctx) => {
 		if (!ctx.hasUI) return;
 		ui = ctx.ui;
 		lastStyle = currentStyle();
 		captureTui(ctx);
-		applyPatch((text, paddingX, streaming, transform) => {
+		releasePatch?.();
+		const handle: PatchHandle = applyPatch((text, paddingX, streaming, transform) => {
 			lastStyle = currentStyle();
 			return new RichMarkdown(text, {
 				style: lastStyle, math, streaming, paddingX, transform,
@@ -151,6 +156,11 @@ export default function piBetterRender(pi: ExtensionAPI): void {
 				requestRender: () => tui?.requestRender?.(),
 			});
 		});
+		releasePatch = handle.release;
+		patchError = handle.reason;
+		if (!handle.installed && handle.reason) {
+			ctx.ui.notify(`pi-better-render disabled: ${handle.reason}`, "warning");
+		}
 		refreshAll();
 		void loadMathJax().then((ok) => {
 			debugLog(ok ? "MathJax loaded" : `MathJax unavailable: ${mathjaxError()}`);
@@ -159,11 +169,13 @@ export default function piBetterRender(pi: ExtensionAPI): void {
 	});
 
 	pi.on("session_shutdown", () => {
-		removePatch();
+		releasePatch?.();
+		releasePatch = undefined;
 		uninstallFrameHook?.();
 		uninstallFrameHook = undefined;
 		dropCaches(false);
-		setRenderRequester(undefined);
+		releaseRequester?.();
+		releaseRequester = undefined;
 		tui = undefined;
 		ui = undefined;
 	});
@@ -186,7 +198,7 @@ export default function piBetterRender(pi: ExtensionAPI): void {
 		handler: async (args, ctx) => {
 			const arg = args.trim().toLowerCase();
 			if (arg === "" || arg === "status") {
-				ctx.ui.notify(statusText(), "info");
+				ctx.ui.notify(statusText(patchError), "info");
 				return;
 			}
 			if (arg === "on" || arg === "off") {
@@ -209,7 +221,7 @@ export default function piBetterRender(pi: ExtensionAPI): void {
 				return;
 			}
 			refreshAll();
-			ctx.ui.notify(statusText(), "info");
+			ctx.ui.notify(statusText(patchError), "info");
 		},
 	});
 }

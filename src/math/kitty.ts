@@ -459,9 +459,19 @@ interface WritableTerminal {
 	write(data: string): void;
 }
 
+const FRAME_HOOK = Symbol.for("pi-better-render.frame-hook");
+
+interface FrameHookRecord {
+	original: WritableTerminal["write"];
+	hook: WritableTerminal["write"];
+}
+
+type HookedTerminal = WritableTerminal & { [FRAME_HOOK]?: FrameHookRecord };
+
 /** Wrap pi's terminal writer so images travel with the frames that show them. Returns an uninstaller. */
 export function installFrameHook(terminal: WritableTerminal, mode: ImageMode = imageMode()): () => void {
-	const original = terminal.write;
+	const target = terminal as HookedTerminal;
+	const original = target[FRAME_HOOK]?.original ?? target.write;
 	let carry = "";
 	const rewrite = mode === "direct" ? createDirectRewriter() : undefined;
 	const hook = function (this: unknown, data: string) {
@@ -482,12 +492,15 @@ export function installFrameHook(terminal: WritableTerminal, mode: ImageMode = i
 		}
 		return original.call(this ?? terminal, out);
 	};
-	terminal.write = hook;
+	target.write = hook;
+	target[FRAME_HOOK] = { original, hook };
 	hooked = true;
 	sent.clear(); // unknown terminal state: resend on first sight
 	placed.clear();
 	return () => {
-		if (terminal.write === hook) terminal.write = original;
+		if (target[FRAME_HOOK]?.hook !== hook) return;
+		if (target.write === hook) target.write = original;
+		delete target[FRAME_HOOK];
 		hooked = false;
 	};
 }
