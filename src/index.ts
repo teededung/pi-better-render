@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { type ExtensionAPI, type ExtensionContext, copyToClipboard, getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import { textFontStatus } from "./math/cjk-font.ts";
 import { createMathRenderer, mathStats, clearFormulaCache } from "./math/formula.ts";
-import { deleteImages, forgetImages, imageMode, installFrameHook } from "./math/kitty.ts";
+import { type AltScreenTarget, deleteImages, forgetImages, imageMode, installFrameHook, installOrcaAltScreenPatch } from "./math/kitty.ts";
 import { loadMathJax, mathjaxBundled, mathjaxError, mathjaxReady } from "./math/mathjax.ts";
 import { detectTexBackend } from "./math/tex-backend.ts";
 import { applyPatch, type PatchHandle } from "./patch.ts";
@@ -92,6 +92,7 @@ export default function piBetterRender(pi: ExtensionAPI): void {
 	let ui: ExtensionContext["ui"] | undefined;
 	let tui: { mode?: string; requestRender?: () => void; invalidate?: () => void; terminal?: { write(data: string): void } } | undefined;
 	let uninstallFrameHook: (() => void) | undefined;
+	let uninstallOrcaAltScreenPatch: (() => void) | undefined;
 	let releasePatch: (() => void) | undefined;
 	let releaseRequester: (() => void) | undefined;
 	let patchError: string | undefined;
@@ -139,6 +140,14 @@ export default function piBetterRender(pi: ExtensionAPI): void {
 		// Send formula images along with the frames that display them (and again after a full clear).
 		uninstallFrameHook?.();
 		uninstallFrameHook = tui?.terminal && typeof tui.terminal.write === "function" ? installFrameHook(tui.terminal) : undefined;
+		uninstallOrcaAltScreenPatch?.();
+		const uninstallDefaultAltScreen = installOrcaAltScreenPatch();
+		const liveProto = tui?.mode === "fullscreen" ? (Object.getPrototypeOf(tui) as AltScreenTarget | null) : null;
+		const uninstallLiveAltScreen = liveProto && liveProto !== Object.prototype ? installOrcaAltScreenPatch(liveProto) : undefined;
+		uninstallOrcaAltScreenPatch = () => {
+			uninstallLiveAltScreen?.();
+			uninstallDefaultAltScreen();
+		};
 	}
 
 	pi.on("session_start", (_event, ctx) => {
@@ -173,6 +182,8 @@ export default function piBetterRender(pi: ExtensionAPI): void {
 		releasePatch = undefined;
 		uninstallFrameHook?.();
 		uninstallFrameHook = undefined;
+		uninstallOrcaAltScreenPatch?.();
+		uninstallOrcaAltScreenPatch = undefined;
 		dropCaches(false);
 		releaseRequester?.();
 		releaseRequester = undefined;

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
 import { test } from "node:test";
-import { type Component, Markdown } from "@earendil-works/pi-tui";
+import { type Component, Markdown, TuiAltScreen } from "@earendil-works/pi-tui";
 
 const noop = (s: string) => s;
 const plainMarkdownTheme = {
@@ -95,6 +95,7 @@ test("stale runtime shutdown during /reload preserves replacement patch, frame h
 		terminalWrites.push(data);
 	};
 	const terminal = { write: baseWrite };
+	const originalAltScreenDoRender = (TuiAltScreen.prototype as unknown as { doRender: () => void }).doRender;
 
 	let renderCount1 = 0;
 	let renderCount2 = 0;
@@ -138,6 +139,11 @@ test("stale runtime shutdown during /reload preserves replacement patch, frame h
 	runtime1.handlers.session_shutdown?.({}, makeCtx(1));
 	assert.equal(isPatched(), true, "replacement patch must remain installed");
 	assert.equal(terminal.write, replacementTerminalWrite, "replacement frame hook must remain installed");
+	assert.notEqual(
+		(TuiAltScreen.prototype as unknown as { doRender: () => void }).doRender,
+		originalAltScreenDoRender,
+		"replacement Orca TuiAltScreen patch must remain installed",
+	);
 
 	const before2 = renderCount2;
 	requestRender();
@@ -151,6 +157,7 @@ test("stale runtime shutdown during /reload preserves replacement patch, frame h
 	runtime2.handlers.session_shutdown?.({}, makeCtx(2));
 	assert.equal(isPatched(), false);
 	assert.equal(terminal.write, baseWrite);
+	assert.equal((TuiAltScreen.prototype as unknown as { doRender: () => void }).doRender, originalAltScreenDoRender);
 });
 
 test("overlapping installFrameHook unwraps prior hook and ignores stale uninstaller", () => {

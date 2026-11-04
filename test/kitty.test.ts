@@ -7,6 +7,8 @@ import {
 	forgetImages,
 	imageMode,
 	installFrameHook,
+	installOrcaAltScreenPatch,
+	orcaKittyTerminal,
 	placeholderRows,
 	prepareFrame,
 	registerImage,
@@ -161,5 +163,80 @@ test("direct mode through the frame hook", () => {
 	const uninstall = installFrameHook(terminal, "direct");
 	terminal.write(`a ${placeholderRows(ID, 3, 1)[0]} b`);
 	assert.equal(placements(written.join("")).length, 1);
+	uninstall();
+});
+
+test("Orca Kitty alt-screen patch scopes WEZTERM_PANE to doRender without leaking to child env", () => {
+	assert.equal(orcaKittyTerminal({ TERM_PROGRAM: "Orca", ORCA_IMAGE_PROTOCOL: "kitty" }), true);
+	assert.equal(orcaKittyTerminal({ TERM_PROGRAM: "orca", ORCA_IMAGE_PROTOCOL: "kitty" }), true);
+	assert.equal(orcaKittyTerminal({ TERM_PROGRAM: "Orca" }), false);
+	assert.equal(orcaKittyTerminal({ TERM_PROGRAM: "ghostty", ORCA_IMAGE_PROTOCOL: "kitty" }), false);
+
+	const env: NodeJS.ProcessEnv = { TERM_PROGRAM: "Orca", ORCA_IMAGE_PROTOCOL: "kitty" };
+	const frames: string[] = [];
+
+	// Mirrors pi-tui 1.5.0 TuiAltScreen.doRender's WezTerm draw-order & covered-row redraw gates.
+	class FakeAltScreen {
+		previousScreen: string[] = [];
+		screen: string[] = ["\x1b_Ga=p,q=2,C=1,c=10,r=3,i=9\x1b\\", "", ""];
+		doRender(): void {
+			const isWezTerm = Boolean(env.WEZTERM_PANE) || env.TERM_PROGRAM?.toLowerCase() === "wezterm";
+			const changed = this.screen.map((line, r) => line !== this.previousScreen[r]);
+			const anchorChanged = changed[0]!;
+			const coveredChanged = !anchorChanged && isWezTerm && (changed[1] || changed[2]);
+			const redrawImages = this.previousScreen.length === 0 || anchorChanged || coveredChanged;
+			let buf = "";
+			if (redrawImages && isWezTerm) {
+				for (let r = 0; r < 3; r++) buf += `\x1b[${r + 1};1H\x1b[2K`;
+				for (let r = 1; r < 3; r++) if (this.screen[r]) buf += `\x1b[${r + 1};1H${this.screen[r]}`;
+				buf += `\x1b[1;1H${this.screen[0]}`;
+			} else {
+				for (let r = 0; r < 3; r++) {
+					if (this.previousScreen.length > 0 && !redrawImages && !changed[r]) continue;
+					buf += `\x1b[${r + 1};1H\x1b[2K${this.screen[r]}`;
+				}
+			}
+			frames.push(buf);
+			this.previousScreen = [...this.screen];
+		}
+	}
+
+	// Unpatched Orca: row 2 & 3 clears come AFTER row 1's Kitty placement, wiping the image body.
+	const unpatched = new FakeAltScreen();
+	unpatched.doRender();
+	assert.ok(frames[0]!.indexOf("\x1b_Ga=p") < frames[0]!.lastIndexOf("\x1b[2K"));
+
+	frames.length = 0;
+	const uninstall = installOrcaAltScreenPatch(FakeAltScreen.prototype, env);
+	const patched = new FakeAltScreen();
+	patched.doRender();
+	assert.ok(frames[0]!.lastIndexOf("\x1b[2K") < frames[0]!.indexOf("\x1b_Ga=p"), "clears precede Kitty placement");
+	assert.equal(env.WEZTERM_PANE, undefined, "WEZTERM_PANE never leaks past doRender");
+
+	// Changing a covered row (e.g. scrollbar/overlay clearing row 2) redraws the image anchor after clears.
+	patched.screen = ["\x1b_Ga=p,q=2,C=1,c=10,r=3,i=9\x1b\\", "   │", ""];
+	patched.doRender();
+	assert.ok(frames[1]!.includes("\x1b_Ga=p"), "covered-row change triggers image redraw");
+	assert.ok(frames[1]!.lastIndexOf("\x1b[2K") < frames[1]!.indexOf("\x1b_Ga=p"));
+	assert.equal(env.WEZTERM_PANE, undefined);
+
+	// Exception inside doRender still cleans up WEZTERM_PANE.
+	const throwingTarget = {
+		doRender() {
+			assert.equal(env.WEZTERM_PANE, "1");
+			throw new Error("boom");
+		},
+	};
+	const uninstallThrow = installOrcaAltScreenPatch(throwingTarget, env);
+	assert.throws(() => throwingTarget.doRender(), /boom/);
+	assert.equal(env.WEZTERM_PANE, undefined, "cleaned up on throw");
+	uninstallThrow();
+
+	// Pre-existing WEZTERM_PANE is preserved untouched.
+	env.WEZTERM_PANE = "42";
+	patched.doRender();
+	assert.equal(env.WEZTERM_PANE, "42");
+	delete env.WEZTERM_PANE;
+
 	uninstall();
 });

@@ -29,6 +29,7 @@
  *
  * Diacritic table: kitty's rowcolumn-diacritics.txt (via Fadouse/pi-math, MIT).
  */
+import * as piTui from "@earendil-works/pi-tui";
 import { getCapabilities, getCellDimensions, getPngDimensions } from "@earendil-works/pi-tui";
 
 const DIACRITIC_CODE_POINTS = [
@@ -502,6 +503,63 @@ export function installFrameHook(terminal: WritableTerminal, mode: ImageMode = i
 		if (target.write === hook) target.write = original;
 		delete target[FRAME_HOOK];
 		hooked = false;
+	};
+}
+
+export interface AltScreenTarget {
+	doRender?: (this: unknown) => void;
+}
+
+const ORCA_ALT_SCREEN_PATCH = Symbol.for("pi-better-render.orca-alt-screen-patch");
+
+interface AltScreenPatchRecord {
+	original: (this: unknown) => void;
+	hook: (this: unknown) => void;
+}
+
+type PatchedAltScreen = AltScreenTarget & { [ORCA_ALT_SCREEN_PATCH]?: AltScreenPatchRecord };
+
+/**
+ * Orca's @xterm/addon-image attaches physical Kitty placements to buffer cells,
+ * so row clears (\x1b[2K) on covered rows wipe multi-row images unless
+ * TuiAltScreen activates its WezTerm draw-last / covered-row redraw path.
+ */
+export function orcaKittyTerminal(env: NodeJS.ProcessEnv = process.env): boolean {
+	return env.TERM_PROGRAM?.toLowerCase() === "orca" && env.ORCA_IMAGE_PROTOCOL === "kitty";
+}
+
+function defaultAltScreenPrototype(): AltScreenTarget | undefined {
+	return (piTui as unknown as { TuiAltScreen?: { prototype?: AltScreenTarget } }).TuiAltScreen?.prototype;
+}
+
+/**
+ * Patch TuiAltScreen.doRender so Orca Kitty sessions run with WEZTERM_PANE
+ * scoped strictly to synchronous frame rendering (never leaked to child processes).
+ */
+export function installOrcaAltScreenPatch(
+	target: AltScreenTarget | undefined = defaultAltScreenPrototype(),
+	env: NodeJS.ProcessEnv = process.env,
+): () => void {
+	if (!target || typeof target.doRender !== "function") return () => {};
+	const proto = target as PatchedAltScreen;
+	const original = proto[ORCA_ALT_SCREEN_PATCH]?.original ?? target.doRender;
+	const hook = function patchedOrcaDoRender(this: unknown) {
+		if (!orcaKittyTerminal(env) || env.WEZTERM_PANE !== undefined) {
+			return original.call(this);
+		}
+		env.WEZTERM_PANE = "1";
+		try {
+			return original.call(this);
+		} finally {
+			delete env.WEZTERM_PANE;
+		}
+	};
+	proto.doRender = hook;
+	proto[ORCA_ALT_SCREEN_PATCH] = { original, hook };
+	return () => {
+		if (proto[ORCA_ALT_SCREEN_PATCH]?.hook !== hook) return;
+		if (proto.doRender === hook) proto.doRender = original;
+		delete proto[ORCA_ALT_SCREEN_PATCH];
 	};
 }
 
