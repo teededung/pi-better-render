@@ -8,6 +8,8 @@
 /** The subset of pi's `Theme` class the renderers need. */
 export interface ThemeLike {
 	readonly name?: string;
+	readonly appearance?: "light" | "dark";
+	readonly colors?: Readonly<Record<string, { readonly kind?: string; readonly r?: number; readonly g?: number; readonly b?: number }>>;
 	fg(color: string, text: string): string;
 	bold(text: string): string;
 	italic(text: string): string;
@@ -73,15 +75,26 @@ function safe(fn: () => string): string {
 	}
 }
 
+function concreteHex(theme: ThemeLike, token: string): string | undefined {
+	const c = theme.colors?.[token];
+	if (c?.kind === "rgb" && typeof c.r === "number" && typeof c.g === "number" && typeof c.b === "number") {
+		return `#${hex2(c.r)}${hex2(c.g)}${hex2(c.b)}`;
+	}
+	return undefined;
+}
+
 export function createStyle(theme: ThemeLike, highlight: Highlighter): Style {
 	const codeBg = safe(() => theme.getBgAnsi("toolPendingBg"));
 	const headerBg = safe(() => theme.getBgAnsi("selectedBg"));
 	const textAnsi = safe(() => theme.getFgAnsi("text"));
-	const mathColor = sgrToHex(textAnsi) ?? "#d4d4d4";
+	const mathColor = sgrToHex(textAnsi) ?? concreteHex(theme, "text") ?? (theme.appearance === "light" ? "#1f2328" : "#d4d4d4");
 	const key = [
 		theme.name ?? "",
+		theme.appearance ?? "",
 		textAnsi,
+		mathColor,
 		codeBg,
+		headerBg,
 		safe(() => theme.getFgAnsi("mdHeading")),
 		safe(() => theme.getFgAnsi("mdCode")),
 		safe(() => theme.getFgAnsi("accent")),

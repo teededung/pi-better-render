@@ -221,3 +221,66 @@ test("inline <br> tags break lines inside table cells and paragraphs", () => {
 	assert.ok(lines.some((l) => l.includes("│ b ") && l.includes("│ d ")));
 });
 
+test("strong emphasis with nested italic before punctuation (screenshot regression)", () => {
+	const style = createStyle(darkTheme(), () => undefined);
+	const md = "- **Phương án B — Có thêm thời gian của phiên đang chạy *(Khuyên dùng)*:**";
+	const plainOut = render(md, 100).join("\n");
+	assert.equal(plainOut, "• Phương án B — Có thêm thời gian của phiên đang chạy (Khuyên dùng):");
+
+	const styledOut = renderMarkdown(md, 100, { style, math: noMath, streaming: false }).join("\n");
+	assert.ok(!styledOut.includes("**"), `must not leak raw ** markers: ${JSON.stringify(styledOut)}`);
+	assert.ok(styledOut.includes("\x1b[1m"), "outer span is bold");
+	assert.ok(styledOut.includes("\x1b[3m(Khuyên dùng)\x1b[23m"), "inner span is italic");
+});
+
+test("nested emphasis, CommonMark rule-of-3, CJK boundaries, and strict ~~ strikethrough", () => {
+	assert.deepEqual(inlineTypes('**foo (*"bar*) (*"baz*) qux**'), ['strong:foo (*"bar*) (*"baz*) qux']);
+	assert.deepEqual(inlineTypes("***foo* *baz***"), ["strong:*foo* *baz*"]);
+	assert.deepEqual(inlineTypes("*foo**bar**baz*"), ["em:foo**bar**baz"]);
+	assert.deepEqual(inlineTypes("**foo*bar**"), ["strong:foo*bar"]);
+	assert.deepEqual(inlineTypes("foo**bar*"), ["text:foo**bar*"]);
+	assert.deepEqual(inlineTypes("x**(n+1) + y**(n+1)"), ["text:x**(n+1) + y**(n+1)"]);
+	assert.deepEqual(inlineTypes("**中文（括号）**后文"), ["strong:中文（括号）", "text:后文"]);
+	assert.deepEqual(inlineTypes("*outer *中文* outer*"), ["em:outer *中文* outer"]);
+	assert.deepEqual(inlineTypes("khoảng ~5 phút đến ~10 phút"), ["text:khoảng ~5 phút đến ~10 phút"]);
+	assert.deepEqual(inlineTypes("~~đã bỏ~~"), ["del:đã bỏ"]);
+});
+
+test("light theme mathColor fallback and table header background across resets", () => {
+	const lightDefaultFg = createStyle(
+		{
+			...darkTheme(),
+			name: "pastel-light",
+			appearance: "light",
+			getFgAnsi: (color) => (color === "text" ? "\x1b[39m" : "\x1b[38;2;9;105;218m"),
+			getBgAnsi: (color) => (color === "selectedBg" ? "\x1b[48;2;232;238;252m" : "\x1b[48;2;244;246;249m"),
+		},
+		() => undefined,
+	);
+	assert.equal(lightDefaultFg.mathColor, "#1f2328");
+
+	const lightConcrete = createStyle(
+		{
+			...darkTheme(),
+			name: "system",
+			appearance: "light",
+			colors: { text: { kind: "rgb", r: 31, g: 35, b: 40 } },
+			getFgAnsi: () => "\x1b[39m",
+		},
+		() => undefined,
+	);
+	assert.equal(lightConcrete.mathColor, "#1f2328");
+
+	const styleWithReset = {
+		...lightDefaultFg,
+		bold: (t: string) => `\x1b[1m${t}\x1b[0m`,
+	};
+	const lines = renderMarkdown("| `Key` | Value |\n|---|---|\n| a | b |", 40, {
+		style: styleWithReset,
+		math: noMath,
+		streaming: false,
+	});
+	assert.ok(lines[1]!.includes("\x1b[0m\x1b[48;2;232;238;252m"), "re-applies headerBg after SGR 0 reset");
+});
+
+

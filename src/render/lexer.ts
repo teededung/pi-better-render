@@ -37,9 +37,150 @@ const INLINE_DISPLAY = /^\$\$(?!\$)((?:\\.|[^\\$])+?)\$\$/;
 const INLINE_PAREN = /^\\\(((?:\\.|[^\\\n]|\n(?!\n))+?)\\\)/;
 const INLINE_DOLLAR = /^\$(?![\s$])((?:\\.|[^\\$\n])*?[^\s\\$])\$(?!\d)|^\$([^\s$\\])\$(?!\d)/;
 
+const STRICT_STRIKETHROUGH = /^(~~)(?=[^\s~])((?:\\.|[^\\])*?(?:\\.|[^\s~\\]))\1(?=[^~]|$)/;
+const CJK_CLASS = String.raw`\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\u3000-\u303f\ufe10-\ufe19\ufe30-\ufe6b\uff01-\uffee`;
+const CJK_CHAR = new RegExp(`[${CJK_CLASS}]`, "u");
+
+function buildEmStrongRDelim(ch: "*" | "_"): RegExp {
+	if (ch === "_") {
+		const p = String.raw`[\p{P}\p{S}${CJK_CLASS}]`,
+			ps = String.raw`[\s\p{P}\p{S}${CJK_CLASS}]`,
+			nps = String.raw`[^\s\p{P}\p{S}${CJK_CLASS}]`;
+		return new RegExp(
+			String.raw`^[^_*]*?\*\*[^_*]*?_[^_*]*?(?=\*\*)|[^_]+(?=[^_])|(?!_)${p}(_+)(?=[\s]|$)|${nps}(_+)(?!_)(?=${ps}|$)|(?!_)${ps}(_+)(?=${nps})|[\s](_+)(?!_)(?=${p})|(?!_)${p}(_+)(?!_)(?=${p})`,
+			"gu",
+		);
+	}
+	const p = String.raw`(?!~)[\p{P}\p{S}${CJK_CLASS}]`,
+		ps = String.raw`(?!~)[\s\p{P}\p{S}${CJK_CLASS}]`,
+		nps = String.raw`(?:[^\s\p{P}\p{S}${CJK_CLASS}]|~)`;
+	return new RegExp(
+		String.raw`^[^_*]*?__[^_*]*?\*[^_*]*?(?=__)|[^*]+(?=[^*])|(?!\*)${p}(\*+)(?=[\s]|$)|${nps}(\*+)(?!\*)(?=${ps}|$)|(?!\*)${ps}(\*+)(?=${nps})|[\s](\*+)(?!\*)(?=${p})|(?!\*)${p}(\*+)(?!\*)(?=${p})|${nps}(\*+)(?=${nps})`,
+		"gu",
+	);
+}
+
+const EM_STRONG_R_AST = buildEmStrongRDelim("*");
+const EM_STRONG_R_UND = buildEmStrongRDelim("_");
+
+function lastCodePoint(str: string, end: number): string {
+	return end > 0 ? ([...str.slice(Math.max(0, end - 2), end)].pop() ?? "") : "";
+}
+
+/**
+ * CommonMark delimiter-stack emphasis tokenizer with CJK boundary support.
+ *
+ * Replaces marked's single-counter `emStrong` loop, which fails to close outer
+ * `**…**` whenever a nested `*…*` closes before punctuation (e.g. `**text *(note)*:**`)
+ * because `(2 + 1) % 3 === 0` skips decrementing the counter tracked against the
+ * outer opener instead of matching the inner `*` opener on the stack.
+ */
+function tokenizeEmStrong(this: any, src: string, maskedSrc: string, prevChar = ""): any {
+	const { rules } = this;
+	let match = rules.inline.emStrongLDelim.exec(src);
+	if (!match || (!match[1] && !match[2] && !match[3] && !match[4])) return undefined;
+	if (match[4] && prevChar.match(rules.other.unicodeAlphaNumeric)) return undefined;
+
+	const nextPunct = match[1] || match[3] || "";
+	const startIdx = maskedSrc.length - src.length;
+	const prevCp = lastCodePoint(maskedSrc, startIdx) || prevChar;
+	const prevIsCjk = Boolean(prevCp && CJK_CHAR.test(prevCp));
+	if (nextPunct && prevChar && !rules.inline.punctuation.exec(prevChar) && !prevIsCjk && !CJK_CHAR.test(nextPunct)) {
+		return undefined;
+	}
+
+	const lLength = [...match[0]].length - 1;
+	const ch = match[0][0] as "*" | "_";
+	let leadSame = 0;
+	if (prevChar === ch) {
+		for (let k = startIdx - 1; k >= 0 && maskedSrc[k] === ch; k--) leadSame++;
+	}
+	const beforeRun = lastCodePoint(maskedSrc, startIdx - leadSame);
+	const d0Both = Boolean(
+		beforeRun &&
+			!/^\s/u.test(beforeRun) &&
+			(ch === "_"
+				? Boolean(nextPunct)
+				: (!rules.inline.punctuation.exec(beforeRun) && !CJK_CHAR.test(beforeRun)) ||
+					Boolean(nextPunct) ||
+					CJK_CHAR.test(match[2] || "")),
+	);
+
+	const openers = [{ len: lLength, orig: lLength + leadSame, both: d0Both }];
+	const endReg = ch === "*" ? EM_STRONG_R_AST : EM_STRONG_R_UND;
+	endReg.lastIndex = 0;
+	const clipped = maskedSrc.slice(-1 * src.length + lLength);
+
+	while ((match = endReg.exec(clipped)) !== null) {
+		const rDelim = match[1] || match[2] || match[3] || match[4] || match[5] || match[6];
+		if (!rDelim) continue;
+		const rOrig = [...rDelim].length;
+		const before = String.fromCodePoint(match[0].codePointAt(0)!);
+		const afterPos = match.index + match[0].length;
+		const after = afterPos < clipped.length ? String.fromCodePoint(clipped.codePointAt(afterPos)!) : "";
+		const cjkBoth =
+			Boolean(match[1] || match[2] || match[3] || match[4]) &&
+			!/^\s/u.test(before) &&
+			Boolean(after) &&
+			!/^\s/u.test(after) &&
+			(CJK_CHAR.test(before) || CJK_CHAR.test(after));
+		const isLeftOnly = Boolean(match[3] || match[4]);
+		const isBoth = Boolean(match[5] || match[6]);
+		const canOpen =
+			(isLeftOnly || isBoth || cjkBoth) &&
+			!(ch === "_" && rules.other.unicodeAlphaNumeric.test(before) && !CJK_CHAR.test(before));
+		const canClose = !isLeftOnly || cjkBoth;
+		const rBoth = canOpen && canClose;
+
+		let rem = rOrig;
+		let d0Used = 0;
+		if (canClose) {
+			for (let j = openers.length - 1; j >= 0 && rem > 0; j--) {
+				const open = openers[j]!;
+				if ((open.both || rBoth) && (open.orig + rOrig) % 3 === 0 && (open.orig % 3 !== 0 || rOrig % 3 !== 0)) {
+					continue;
+				}
+				openers.length = j + 1;
+				const used = Math.min(open.len, rem);
+				open.len -= used;
+				rem -= used;
+				if (j === 0) d0Used = used;
+				else if (open.len === 0) openers.pop();
+			}
+		}
+
+		if (openers[0]!.len === 0) {
+			const usedR = rOrig - rem;
+			const firstCharLen = [...match[0]][0]!.length;
+			const raw = src.slice(0, lLength + match.index + firstCharLen + usedR);
+			const step = d0Used % 2 ? 1 : 2;
+			const text = raw.slice(step, -step);
+			return {
+				type: step === 1 ? "em" : "strong",
+				raw,
+				text,
+				tokens: this.lexer.inlineTokens(text),
+			};
+		}
+
+		if (canOpen && rem > 0) {
+			openers.push({ len: rem, orig: rOrig, both: rBoth });
+		}
+	}
+	return undefined;
+}
+
 function createMarked(streaming: boolean): Marked {
 	const marked = new Marked({ gfm: true });
 	marked.use({
+		tokenizer: {
+			emStrong: tokenizeEmStrong,
+			del(this: any, src: string) {
+				const m = STRICT_STRIKETHROUGH.exec(src);
+				if (!m) return undefined;
+				return { type: "del", raw: m[0], text: m[2]!, tokens: this.lexer.inlineTokens(m[2]!) };
+			},
+		},
 		extensions: [
 			{
 				name: "blockMath",

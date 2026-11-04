@@ -3,6 +3,12 @@ import { renderInline } from "./inline.ts";
 import { type Align, pad, visibleWidth, wrap } from "./util.ts";
 
 const MIN_COLUMN = 3;
+const BG_RESET = "\x1b[49m";
+
+function withBackground(text: string, bg: string): string {
+	if (!bg) return text;
+	return text.replace(/\x1b\[0?m/g, (m) => m + bg).replace(/\x1b\[49m/g, bg);
+}
 
 /**
  * Distribute `available` columns: every column gets what it needs if possible;
@@ -87,7 +93,7 @@ export function renderTable(token: any, ctx: RenderContext): string[] {
 			widths.forEach((w, i) => {
 				const content = pad(wrapped[i]![line] ?? "", w, isHeader ? "left" : aligns[i]);
 				const cell = ` ${isHeader ? style.bold(style.fg("mdHeading", content)) : content} `;
-				s += (isHeader && style.headerBg ? style.headerBg + cell + "\x1b[49m" : cell) + border("│");
+				s += (isHeader && style.headerBg ? style.headerBg + withBackground(cell, style.headerBg) + BG_RESET : cell) + border("│");
 			});
 			out.push(s);
 		}
