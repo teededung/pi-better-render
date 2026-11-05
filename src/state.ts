@@ -9,6 +9,8 @@ export const state = {
 	math: "streaming" as MathMode,
 	/** Draw ```mermaid blocks as diagrams instead of showing their source. */
 	mermaid: true,
+	/** Colorize bash/powershell tool commands and stdout/stderr (diffs, git status/stat, tests, JSON). */
+	shell: true,
 	/** Show line numbers in code blocks. */
 	lineNumbers: false,
 	/** Append context-sanitizer diagnostics to ~/.pi/agent/better-render-debug.log. */

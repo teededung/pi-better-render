@@ -29,8 +29,25 @@ declare module "@earendil-works/pi-coding-agent" {
 
 	export interface ExtensionCommandContext extends ExtensionContext {}
 
+	export interface ToolRenderResultOptions {
+		expanded: boolean;
+		isPartial: boolean;
+	}
+
+	export interface ToolRenderers {
+		renderShell?: "default" | "self";
+		renderCall?: (args: any, theme: any, context: any) => Component;
+		renderResult?: (result: any, options: ToolRenderResultOptions, theme: any, context: any) => Component | undefined;
+	}
+
+	export type ToolRendererResolver = (
+		toolName: string,
+		next: () => ToolRenderers | undefined,
+	) => ToolRenderers | undefined;
+
 	export interface ExtensionAPI {
 		on(event: string, handler: (event: any, ctx: ExtensionContext) => unknown): () => void;
+		registerToolRenderer?(resolver: ToolRendererResolver): void;
 		registerCommand(
 			name: string,
 			options: {

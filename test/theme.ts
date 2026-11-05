@@ -19,6 +19,12 @@ const FG: Record<string, string> = {
 	mdQuoteBorder: "#808080",
 	mdHr: "#808080",
 	mdListBullet: "#8abeb7",
+	toolTitle: "#e0e0e0",
+	toolOutput: "#b0b0b0",
+	toolDiffAdded: "#98c379",
+	toolDiffRemoved: "#e06c75",
+	toolDiffContext: "#909090",
+	syntaxNumber: "#d19a66",
 };
 const BG: Record<string, string> = { toolPendingBg: "#282832", selectedBg: "#3a3a4a" };
 

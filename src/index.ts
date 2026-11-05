@@ -19,6 +19,7 @@ import { applyPatch, type PatchHandle } from "./patch.ts";
 import { clearLexCache } from "./render/lexer.ts";
 import { depsDir, mermaidEngine } from "./render/mermaid.ts";
 import { cacheStats, clearBlockCache, RichMarkdown } from "./render/rich-markdown.ts";
+import { createShellToolRendererResolver } from "./render/shell.ts";
 import { containsRenderArtifacts, sanitizeMessages } from "./sanitize.ts";
 import { bumpVersion, type MathMode, setRenderRequester, state } from "./state.ts";
 import { createStyle, plainStyle, type Style } from "./style.ts";
@@ -51,7 +52,7 @@ function statusText(patchError?: string): string {
 	const avg = mathStats.rendered > 0 ? (mathStats.totalMs / mathStats.rendered).toFixed(1) : "–";
 	const richStatus = patchError ? `incompatible (${patchError})` : state.enabled ? "on" : "off";
 	return [
-		`rich markdown: ${richStatus}   math: ${state.math}   line numbers: ${state.lineNumbers ? "on" : "off"}   mermaid: ${state.mermaid ? "on" : "off"}`,
+		`rich markdown: ${richStatus}   math: ${state.math}   line numbers: ${state.lineNumbers ? "on" : "off"}   mermaid: ${state.mermaid ? "on" : "off"}   shell: ${state.shell ? "on" : "off"}`,
 		`math engine: ${mathjaxReady() ? `MathJax${mathjaxBundled() ? " (bundled)" : ""} + resvg` : mathjaxError() ? `unavailable (${mathjaxError()})` : "loading…"}`,
 		`TeX fallback: ${tex ? tex.name : "none"}   images: ${imageStatus()}`,
 		`text fonts: ${textFontStatus()}`,
@@ -85,6 +86,7 @@ const COMMANDS = [
 	{ value: "math:off", label: "math:off", description: "Never render formulas as images" },
 	{ value: "lines", label: "lines", description: "Toggle code block line numbers" },
 	{ value: "mermaid", label: "mermaid", description: "Toggle drawing mermaid blocks as diagrams" },
+	{ value: "shell", label: "shell", description: "Toggle rich color rendering for bash/powershell tool cards" },
 	{ value: "clear-cache", label: "clear-cache", description: "Drop cached renders and terminal images" },
 ];
 
@@ -99,17 +101,22 @@ export default function piBetterRender(pi: ExtensionAPI): void {
 	let lastStyle: Style = plainStyle();
 	const math = createMathRenderer(() => lastStyle.mathColor);
 
-	function currentStyle(): Style {
-		const theme = ui?.theme;
-		if (!theme) return plainStyle();
-		let highlight: Style["highlight"] = () => undefined;
+	function currentHighlighter(): Style["highlight"] {
 		try {
 			const md = getMarkdownTheme();
-			if (md.highlightCode) highlight = (code, lang) => md.highlightCode!(code, lang);
+			if (md.highlightCode) return (code, lang) => md.highlightCode!(code, lang);
 		} catch {
 			// no highlighting available
 		}
-		return createStyle(theme, highlight);
+		return () => undefined;
+	}
+
+	pi.registerToolRenderer?.(createShellToolRendererResolver(currentHighlighter));
+
+	function currentStyle(): Style {
+		const theme = ui?.theme;
+		if (!theme) return plainStyle();
+		return createStyle(theme, currentHighlighter());
 	}
 
 	/** Re-render every message (after a mode switch, theme change or MathJax finishing to load). */
@@ -204,7 +211,7 @@ export default function piBetterRender(pi: ExtensionAPI): void {
 	});
 
 	pi.registerCommand("better-render", {
-		description: "Rich Markdown / math rendering: status | on | off | math:streaming|final|off | lines | mermaid | clear-cache",
+		description: "Rich Markdown / math / shell rendering: status | on | off | math:streaming|final|off | lines | mermaid | shell | clear-cache",
 		getArgumentCompletions: (prefix) => COMMANDS.filter((c) => c.value.startsWith(prefix.trim())),
 		handler: async (args, ctx) => {
 			const arg = args.trim().toLowerCase();
@@ -225,6 +232,8 @@ export default function piBetterRender(pi: ExtensionAPI): void {
 				state.lineNumbers = !state.lineNumbers;
 			} else if (arg === "mermaid") {
 				state.mermaid = !state.mermaid;
+			} else if (arg === "shell") {
+				state.shell = !state.shell;
 			} else if (arg === "clear-cache") {
 				dropCaches(true);
 			} else {
