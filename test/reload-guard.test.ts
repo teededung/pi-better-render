@@ -177,3 +177,52 @@ test("overlapping installFrameHook unwraps prior hook and ignores stale uninstal
 	uninstall2();
 	assert.equal(terminal.write, base, "active uninstaller must restore original unwrapped write");
 });
+
+test("applyPatch unwraps thinking MouseRegion and clears thinkingVisibilityOverrides while keeping thinking Markdown native", () => {
+	removePatch();
+
+	class FakeThinkingAssistantMessage extends FakeAssistantMessageComponent {
+		thinkingVisibilityOverrides = new Map<number, boolean>([[0, true]]);
+		override updateContent(_message: unknown, isStreaming = false): void {
+			this.isStreaming = isStreaming;
+			const thinkingMd = new Markdown("Let's inspect the diff.", 1, 0, plainMarkdownTheme);
+			const mouseWrappedThinking = {
+				child: thinkingMd,
+				onMouse: () => ({ handled: true }),
+				handleMouse: () => ({ handled: true }),
+				render: (w: number) => thinkingMd.render(w),
+				invalidate: () => thinkingMd.invalidate(),
+			} as unknown as Component;
+			const bodyMd = new Markdown("**final answer**", 1, 0, plainMarkdownTheme);
+			this.contentContainer.children = [mouseWrappedThinking, bodyMd];
+		}
+	}
+
+	const handle = applyPatch(
+		(text) => ({ render: () => [`RICH:${text}`], invalidate() {} }),
+		FakeThinkingAssistantMessage.prototype,
+	);
+	assert.equal(handle.installed, true);
+
+	const inst = new FakeThinkingAssistantMessage();
+	inst.updateContent("ignored", false);
+
+	assert.equal(inst.thinkingVisibilityOverrides.size, 0, "per-run click collapse overrides must be cleared");
+	assert.equal(
+		inst.contentContainer.children[0] instanceof Markdown,
+		true,
+		"thinking MouseRegion must be unwrapped to its inner native Markdown",
+	);
+	assert.equal(
+		(inst.contentContainer.children[0] as unknown as { handleMouse?: unknown }).handleMouse,
+		undefined,
+		"unwrapped thinking block must no longer intercept mouse clicks",
+	);
+	assert.deepEqual(
+		inst.contentContainer.children[1]?.render(80),
+		["RICH:**final answer**"],
+		"assistant body Markdown is still replaced with RichMarkdown",
+	);
+
+	handle.release();
+});

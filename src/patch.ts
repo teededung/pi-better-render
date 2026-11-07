@@ -20,6 +20,7 @@ export type RichFactory = (text: string, paddingX: number, streaming: boolean, t
 
 export interface PatchTarget {
 	contentContainer?: { children: Component[] };
+	thinkingVisibilityOverrides?: Map<number, boolean>;
 	isStreaming?: boolean;
 	updateContent?: (this: any, message: unknown, isStreaming?: boolean) => void;
 }
@@ -31,7 +32,7 @@ export interface PatchHandle {
 }
 
 const PATCH = Symbol.for("pi-better-render.assistant-patch");
-const PATCH_VERSION = 1;
+const PATCH_VERSION = 2;
 
 interface PatchRecord {
 	version: number;
@@ -80,10 +81,27 @@ export function probePatchCapability(
 	return probeMarkdownTextField();
 }
 
+function isMouseRegionWrapper(component: unknown): component is { child: Component; onMouse: unknown } {
+	if (!component || typeof component !== "object") return false;
+	const candidate = component as { child?: unknown; onMouse?: unknown; handleMouse?: unknown };
+	return (
+		Boolean(candidate.child) &&
+		typeof (candidate.child as Component).render === "function" &&
+		typeof candidate.onMouse === "function" &&
+		typeof candidate.handleMouse === "function"
+	);
+}
+
 function swapChildren(component: PatchTarget, factory: RichFactory): void {
 	const children = component.contentContainer?.children;
 	if (!Array.isArray(children)) return;
 	for (let i = 0; i < children.length; i++) {
+		if (isMouseRegionWrapper(children[i])) {
+			// Unwrap Pi 1.5.0's MouseRegion around thinking blocks so left-clicks in the
+			// transcript never collapse visible thoughts into "Thinking...".
+			children[i] = (children[i] as unknown as { child: Component }).child;
+			continue;
+		}
 		if (!(children[i] instanceof Markdown)) continue;
 		// Markdown keeps these private; they are plain fields at runtime.
 		const child = children[i] as unknown as { text?: unknown; paddingX?: number; options?: { transform?: MarkdownTransform } };
@@ -113,6 +131,9 @@ export function applyPatch(
 	if (existing) removePatch(proto);
 	const record: PatchRecord = { version: PATCH_VERSION, original: proto.updateContent!, factory };
 	proto.updateContent = function patchedUpdateContent(this: PatchTarget, message: unknown, isStreaming?: boolean) {
+		if (state.enabled) {
+			this.thinkingVisibilityOverrides?.clear?.();
+		}
 		record.original.call(this, message, isStreaming);
 		if (!state.enabled) return;
 		try {
