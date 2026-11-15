@@ -19,6 +19,7 @@ import { applyPatch, type PatchHandle } from "./patch.ts";
 import { clearLexCache } from "./render/lexer.ts";
 import { depsDir, mermaidEngine } from "./render/mermaid.ts";
 import { cacheStats, clearBlockCache, RichMarkdown } from "./render/rich-markdown.ts";
+import { createCodemodeToolRendererResolver } from "./render/codemode.ts";
 import { createShellToolRendererResolver } from "./render/shell.ts";
 import { containsRenderArtifacts, sanitizeMessages } from "./sanitize.ts";
 import { bumpVersion, type MathMode, setRenderRequester, state } from "./state.ts";
@@ -86,7 +87,7 @@ const COMMANDS = [
 	{ value: "math:off", label: "math:off", description: "Never render formulas as images" },
 	{ value: "lines", label: "lines", description: "Toggle code block line numbers" },
 	{ value: "mermaid", label: "mermaid", description: "Toggle drawing mermaid blocks as diagrams" },
-	{ value: "shell", label: "shell", description: "Toggle rich color rendering for bash/powershell tool cards" },
+	{ value: "shell", label: "shell", description: "Toggle rich color rendering for bash/powershell/codemode tool cards" },
 	{ value: "clear-cache", label: "clear-cache", description: "Drop cached renders and terminal images" },
 ];
 
@@ -112,6 +113,7 @@ export default function piBetterRender(pi: ExtensionAPI): void {
 	}
 
 	pi.registerToolRenderer?.(createShellToolRendererResolver(currentHighlighter));
+	pi.registerToolRenderer?.(createCodemodeToolRendererResolver(currentHighlighter));
 
 	function currentStyle(): Style {
 		const theme = ui?.theme;

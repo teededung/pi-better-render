@@ -20,11 +20,11 @@ import type { ToolRendererResolver, ToolRenderers } from "@earendil-works/pi-cod
 import { state } from "../state.ts";
 import type { Highlighter, ThemeLike } from "../style.ts";
 
-interface SettableText {
+export interface SettableText {
 	setText(text: string): void;
 }
 
-function isSettableText(value: unknown): value is SettableText {
+export function isSettableText(value: unknown): value is SettableText {
 	return Boolean(value && typeof value === "object" && typeof (value as SettableText).setText === "function");
 }
 
@@ -39,7 +39,7 @@ const ANY_SGR_RE = /\x1b\[[0-9;]*m/;
 /** Reset bold/italic/underline/strike/fg without resetting the tool card's background (`49`). */
 const SAFE_ATTR_FG_RESET = "\x1b[22;23;24;29;39m";
 
-function fg(theme: ThemeLike, color: string, fallback: string, text: string): string {
+export function fg(theme: ThemeLike, color: string, fallback: string, text: string): string {
 	if (!text) return "";
 	try {
 		return theme.fg(color, text);
@@ -50,6 +50,28 @@ function fg(theme: ThemeLike, color: string, fallback: string, text: string): st
 			return text;
 		}
 	}
+}
+
+export function extractToolSummaryArg(args: unknown): string | undefined {
+	if (!args || typeof args !== "object" || Array.isArray(args)) return undefined;
+	const rec = args as Record<string, unknown>;
+	const raw = typeof rec.toolSummary === "string" ? rec.toolSummary : typeof rec.toolAction === "string" ? rec.toolAction : undefined;
+	if (!raw) return undefined;
+	const cleaned = raw.replace(/\s+/g, " ").trim();
+	return cleaned.length > 0 ? cleaned : undefined;
+}
+
+export function formatInlineToolSummary(summary: string, theme: ThemeLike): string {
+	const colored = fg(theme, "thinkingText", "muted", summary).replace(/\x1b\[2m/g, "");
+	return theme.italic(colored);
+}
+
+export function hasOuterToolSummary(comp: unknown): boolean {
+	if (!comp || typeof comp !== "object") return false;
+	const rec = comp as Record<string, unknown>;
+	if (rec.inner === undefined) return false;
+	if ("hasSummary" in rec) return Boolean(rec.hasSummary);
+	return "summaryText" in rec || "summary" in rec;
 }
 
 function stripSgr(text: string): string {
@@ -561,13 +583,19 @@ export function createShellToolRendererResolver(
 									: undefined;
 							if (targetText) {
 								const formatted = formatShellCommandCall(
-									args as { command?: unknown; timeout?: unknown } | undefined,
+									args as { command?: unknown; timeout?: unknown; toolSummary?: unknown; toolAction?: unknown } | undefined,
 									prompt,
 									lang,
 									theme as ThemeLike,
 									getHighlighter(),
 								);
-								if (formatted) targetText.setText(formatted);
+								if (formatted) {
+									const summary = !hasOuterToolSummary(comp) ? extractToolSummaryArg(args) : undefined;
+									const text = summary
+										? `${formatInlineToolSummary(summary, theme as ThemeLike)}\n\n${formatted}`
+										: formatted;
+									targetText.setText(text);
+								}
 							}
 						} catch {
 							// Never break Pi's built-in call rendering.
