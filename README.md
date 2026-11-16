@@ -22,6 +22,8 @@ such as WezTerm.
 
 Built on top of `pi-better-render` with practical TUI and tool-card improvements:
 
+![Codemode nested-call framing and shell syntax highlighting in pi-md-render](assets/codemode-demo.jpg)
+
 - **Codemode nested-call framing (`codemode` / `pi__codemode`).** Hides noisy wrapper JavaScript and raw `tuiText` output, extracts nested `tools.*(...)` calls into clean individual cards, and recovers `toolSummary` titles even past 200-character argument truncation.
 - **Rich Shell syntax & output colorization (`bash` / `pi__bash`).** Colorizes `git status -s`, `git diff --stat`, unified diffs, `commit`/`push`/`log`, test runners, JSON, and compiler diagnostics while preserving safe SGR formatting. Composes cleanly with `pi-agy-provider`'s `SummaryCallContainer` (collapsed and expanded previews), toggleable via `/better-render shell`.
 - **Cleaner links, tables, and themes.** Strips redundant trailing `‹url›` suffixes from OSC 8 hyperlinks, breaks lines on inline `<br>` in tables and paragraphs, preserves table header backgrounds across SGR resets, and adds light-theme math color fallbacks plus CommonMark rule-of-3 / CJK emphasis handling.
