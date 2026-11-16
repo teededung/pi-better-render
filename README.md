@@ -1,4 +1,4 @@
-# pi-better-render
+# pi-md-render
 
 Streaming-first rich rendering for [pi](https://pi.dev)'s TUI. Markdown, code blocks, tables and
 LaTeX formulas are rendered as the answer streams in, with formulas shown as real images. It is
@@ -221,6 +221,14 @@ The `pi-package` keyword lists the package in the [pi package gallery](https://p
 
 The Kitty diacritic table and the formula-scaling approach are adapted from
 [Fadouse/pi-math](https://github.com/Fadouse/pi-math) (MIT).
+
+## More Pi Extensions
+
+| Package | Description | Install |
+| --- | --- | --- |
+| [pi-agy-provider](https://github.com/teededung/pi-agy-provider) | Antigravity (`agy`) provider & multi-agent orchestrator (`/swarm`, `/boost`, `/teamwork`, `/btw`) | `pi install npm:pi-agy-provider` |
+| [pi-md-render](https://github.com/teededung/pi-md-render) | Streaming-first rich Markdown, code, Mermaid & LaTeX rendering for the Pi TUI | `pi install npm:pi-md-render` |
+| [pi-session-sweep](https://github.com/teededung/pi-session-sweep) | Session management & cleanup with native `agy` conversation cleanup | `pi install npm:pi-session-sweep` |
 
 ## License
 

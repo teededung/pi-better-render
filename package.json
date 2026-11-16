@@ -1,5 +1,5 @@
 {
-  "name": "pi-better-render",
+  "name": "pi-md-render",
   "version": "0.4.4",
   "description": "Streaming-first rich Markdown, code and math rendering for the pi TUI (display-only; never touches LLM context).",
   "keywords": [
@@ -15,11 +15,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/teededung/pi-better-render.git"
+    "url": "git+https://github.com/teededung/pi-md-render.git"
   },
-  "homepage": "https://github.com/teededung/pi-better-render#readme",
+  "homepage": "https://github.com/teededung/pi-md-render#readme",
   "bugs": {
-    "url": "https://github.com/teededung/pi-better-render/issues"
+    "url": "https://github.com/teededung/pi-md-render/issues"
   },
   "type": "module",
   "main": "./src/index.ts",
