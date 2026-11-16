@@ -217,6 +217,10 @@ The `pi-package` keyword lists the package in the [pi package gallery](https://p
 
 ## Credits
 
+`pi-md-render` is built on and extends [JeffeyChou/pi-better-render](https://github.com/JeffeyChou/pi-better-render)
+by **Jiefeng Zhou** (MIT). Full credit for the core streaming Markdown, Mermaid, and MathJax/Kitty
+rendering architecture goes to the upstream project.
+
 [MathJax](https://www.mathjax.org) (Apache-2.0) is bundled in `vendor/`; see `vendor/LICENSE`.
 
 The Kitty diacritic table and the formula-scaling approach are adapted from
@@ -232,4 +236,4 @@ The Kitty diacritic table and the formula-scaling approach are adapted from
 
 ## License
 
-MIT
+MIT — originally created by Jiefeng Zhou ([JeffeyChou/pi-better-render](https://github.com/JeffeyChou/pi-better-render)), see [LICENSE](./LICENSE).
