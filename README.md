@@ -18,6 +18,15 @@ such as WezTerm.
   after that it behaves as ordinary text cells, so it wraps, scrolls and diffs like text. Inline
   formulas sit inside the line. Formulas stay in the scrollback after pi exits.
 
+## Enhancements in `pi-md-render`
+
+Built on top of `pi-better-render` with practical TUI and tool-card improvements:
+
+- **Codemode nested-call framing (`codemode` / `pi__codemode`).** Hides noisy wrapper JavaScript and raw `tuiText` output, extracts nested `tools.*(...)` calls into clean individual cards, and recovers `toolSummary` titles even past 200-character argument truncation.
+- **Rich Shell syntax & output colorization (`bash` / `pi__bash`).** Colorizes `git status -s`, `git diff --stat`, unified diffs, `commit`/`push`/`log`, test runners, JSON, and compiler diagnostics while preserving safe SGR formatting. Composes cleanly with `pi-agy-provider`'s `SummaryCallContainer` (collapsed and expanded previews), toggleable via `/better-render shell`.
+- **Cleaner links, tables, and themes.** Strips redundant trailing `‹url›` suffixes from OSC 8 hyperlinks, breaks lines on inline `<br>` in tables and paragraphs, preserves table header backgrounds across SGR resets, and adds light-theme math color fallbacks plus CommonMark rule-of-3 / CJK emphasis handling.
+- **Terminal & reload stability.** Preserves Kitty inline formula images inside Orca alt-screen sessions, unwraps thinking `MouseRegion` so left-clicks do not collapse thoughts into `Thinking...`, and adds reload ownership guards with capability probing across `/reload`.
+
 ## Compared with other pi extensions
 
 | | **pi-better-render** | [pi-math](https://github.com/Fadouse/pi-math) | [pi-markdown-preview](https://github.com/omaclaren/pi-markdown-preview) | [pi-rich-renderer](https://github.com/dbydd/pi-rich-renderer) |
@@ -140,16 +149,16 @@ assistant delta ─▶ incremental lexer (marked) ─▶ block renderer + cache 
 ## Install
 
 ```sh
-pi install npm:pi-better-render                       # from npm
-pi install git:github.com/JeffeyChou/pi-better-render
-pi -e npm:pi-better-render                            # try it for one run without installing
+pi install npm:pi-md-render                           # from npm
+pi install git:github.com/teededung/pi-md-render
+pi -e npm:pi-md-render                                # try it for one run without installing
 ```
 
 From a local checkout:
 
 ```sh
 npm install
-pi install ./path/to/pi-better-render                 # or: pi -e ./src/index.ts
+pi install ./path/to/pi-md-render                     # or: pi -e ./src/index.ts
 ```
 
 Images need a terminal with the Kitty graphics protocol. Ghostty and kitty use Unicode placeholders.
@@ -166,6 +175,7 @@ formulas use pi's Unicode approximation and everything else still renders.
 - `on` / `off` turns rich rendering on, or switches back to pi's built-in Markdown.
 - `math:streaming`, `math:final` or `math:off` controls when formulas become images.
 - `lines` toggles line numbers in code blocks.
+- `shell` toggles rich syntax & output colorization for `bash` / `pi__bash` and `codemode` tool cards.
 - `mermaid` toggles drawing ` ```mermaid ` blocks as diagrams (off shows their source).
   The diagram renderer ([beautiful-mermaid](https://github.com/lukilabs/beautiful-mermaid), about
   11 MB with its layout engine) is not installed with the package. The first ` ```mermaid ` block
