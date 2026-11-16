@@ -56,6 +56,14 @@ test("extractCallsFromCode and parseCallArgsLenient recover toolSummary and full
 
 	assert.deepEqual(parseCodemodeHeaderOptions(code), ["timeout 60.0s", "max 10k tok"]);
 	const extracted = extractCallsFromCode(code);
+
+	// Regression guard: stray ')' or ']' inside a malformed object literal must never hang.
+	const malformed = extractCallsFromCode(
+		'tools.read({ path: "a.ts", toolSummary: "x" ) + tools.bash({ command: "ls", x: y ] })',
+	);
+	assert.equal(malformed.length, 2);
+	assert.equal(malformed[0]?.args.path, "a.ts");
+	assert.equal(malformed[1]?.args.command, "ls");
 	assert.equal(extracted.length, 3);
 	assert.equal(extracted[0]?.tool, "bash");
 	assert.equal(extracted[0]?.args.toolSummary, "Search state.shell and resolver refs");

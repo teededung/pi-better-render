@@ -354,7 +354,9 @@ function parseObjectLiteralArgs(src: string, openBrace: number): { args: Record<
 		} else {
 			const idMatch = /^[A-Za-z_$][A-Za-z0-9_$]*/.exec(src.slice(i));
 			if (!idMatch) {
-				i = skipBalancedValue(src, i);
+				const next = skipBalancedValue(src, i);
+				if (next <= i) break;
+				i = next;
 				continue;
 			}
 			key = idMatch[0];
@@ -364,7 +366,9 @@ function parseObjectLiteralArgs(src: string, openBrace: number): { args: Record<
 		i = skipWsAndComments(src, i);
 		// Shorthand `{ path }` — value is a runtime variable, skip until comma/brace.
 		if (src[i] !== ":") {
-			i = skipBalancedValue(src, i);
+			const next = skipBalancedValue(src, i);
+			if (next <= i) break;
+			i = next;
 			continue;
 		}
 		i = skipWsAndComments(src, i + 1);
@@ -430,7 +434,9 @@ function parseObjectLiteralArgs(src: string, openBrace: number): { args: Record<
 				continue;
 			}
 		}
-		i = skipBalancedValue(src, i);
+		const next = skipBalancedValue(src, i);
+		if (next <= i) break;
+		i = next;
 	}
 	return { args, end: i };
 }
