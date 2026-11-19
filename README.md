@@ -245,6 +245,7 @@ The Kitty diacritic table and the formula-scaling approach are adapted from
 | [pi-agy-provider](https://github.com/teededung/pi-agy-provider) | Antigravity (`agy`) provider & multi-agent orchestrator (`/swarm`, `/boost`, `/teamwork`, `/btw`) | `pi install npm:pi-agy-provider` |
 | [pi-md-render](https://github.com/teededung/pi-md-render) | Streaming-first rich Markdown, code, Mermaid & LaTeX rendering for the Pi TUI | `pi install npm:pi-md-render` |
 | [pi-session-sweep](https://github.com/teededung/pi-session-sweep) | Session management & cleanup with native `agy` conversation cleanup | `pi install npm:pi-session-sweep` |
+| [pi-image-compress](https://github.com/teededung/pi-image-compress) | Auto-compress pasted & referenced local images with atomic `[imageN]` editor links | `pi install npm:pi-image-compress` |
 
 ## License
 
