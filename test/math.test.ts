@@ -5,6 +5,7 @@ import { test } from "node:test";
 import { setCapabilities, setCellDimensions, visibleWidth } from "@earendil-works/pi-tui";
 import { createMathRenderer } from "../src/math/formula.ts";
 import { deleteImages, installFrameHook, placeholderRows, prepareFrame, registerImage, setKittyWriter, transmitSequence } from "../src/math/kitty.ts";
+import { FontPendingError } from "../src/math/cjk-font.ts";
 import { loadMathJaxSync, MathError, rasterize } from "../src/math/mathjax.ts";
 import { renderMarkdown } from "../src/render/rich-markdown.ts";
 import { containsRenderArtifacts, sanitizeMessages, stripRenderArtifacts } from "../src/sanitize.ts";
@@ -31,15 +32,16 @@ test("MathJax renders AMS constructs to PNG on the cell grid", () => {
 });
 
 test("MathJax 4 packages, font extensions, extra macros and single tags typeset", () => {
-	const prev = process.env.PI_BETTER_RENDER_FONT_DOWNLOAD;
-	process.env.PI_BETTER_RENDER_FONT_DOWNLOAD = "0";
-	try {
-		for (const tex of ["\\dv{f}{x}+\\pdv{f}{y}+\\norm{v}", "\\ce{2H2 + O2 -> 2H2O}", "\\mathbbm{1}\\mathds{1}", "\\bm{x}\\llbracket A\\rrbracket", "\\qty{3}{m}", "E=mc^2\\tag{1}", "\\text{中文} x"]) {
-			assert.doesNotThrow(() => rasterize({ ...base, tex, display: true, maxRows: 24 }), tex);
-		}
-	} finally {
-		if (prev === undefined) delete process.env.PI_BETTER_RENDER_FONT_DOWNLOAD;
-		else process.env.PI_BETTER_RENDER_FONT_DOWNLOAD = prev;
+	for (const tex of ["\\dv{f}{x}+\\pdv{f}{y}+\\norm{v}", "\\ce{2H2 + O2 -> 2H2O}", "\\mathbbm{1}\\mathds{1}", "\\bm{x}\\llbracket A\\rrbracket", "\\qty{3}{m}", "E=mc^2\\tag{1}", "\\text{中文} x"]) {
+		assert.doesNotThrow(() => {
+			try {
+				rasterize({ ...base, tex, display: true, maxRows: 24 });
+			} catch (err) {
+				// On headless Linux runners without a CJK font, MathJax still typesets
+				// cleanly and resvg defers rasterization via FontPendingError.
+				if (!(err instanceof FontPendingError)) throw err;
+			}
+		}, tex);
 	}
 });
 
