@@ -8,8 +8,10 @@ import {
 	extractCallsFromCode,
 	formatCodemodeCalls,
 	formatCodemodeHeader,
+	middleTruncatePath,
 	parseCallArgsLenient,
 	parseCodemodeHeaderOptions,
+	shortenDisplayPath,
 } from "../src/render/codemode.ts";
 import { createShellToolRendererResolver } from "../src/render/shell.ts";
 import { state } from "../src/state.ts";
@@ -313,4 +315,94 @@ test("standalone codemode and bash fallback to inline args.toolSummary and respe
 	} finally {
 		state.shell = true;
 	}
+});
+
+test("shortenDisplayPath prefers cwd-relative paths, falls back to ~, and keeps long edit paths inline on one row", () => {
+	const home = homedir();
+	const cwd = `${home}/Documents/Repo/ragnarok`;
+	const insideAbs = `${cwd}/worktrees/lani-shield/next-ma/client-runtime/src/windows/runtime_login_send_hook.cpp`;
+	const insideTilde = `~/Documents/Repo/ragnarok/worktrees/lani-shield/next-ma/client-runtime/src/windows/runtime_fps_overlay.hpp`;
+	const outsideAbs = `${home}/OtherRepo/deep/folder/file.ts`;
+
+	assert.equal(
+		shortenDisplayPath(insideAbs, cwd),
+		"worktrees/lani-shield/next-ma/client-runtime/src/windows/runtime_login_send_hook.cpp",
+	);
+	assert.equal(
+		shortenDisplayPath(insideTilde, cwd),
+		"worktrees/lani-shield/next-ma/client-runtime/src/windows/runtime_fps_overlay.hpp",
+	);
+	assert.equal(shortenDisplayPath(outsideAbs, cwd), "~/OtherRepo/deep/folder/file.ts");
+	assert.equal(
+		middleTruncatePath(
+			"worktrees/lani-shield/next-ma/client-runtime/src/windows/runtime_login_send_hook.cpp",
+			60,
+		),
+		"worktrees/…/src/windows/runtime_login_send_hook.cpp",
+	);
+
+	// Real ANSI-only theme so Text.render(width) measures exact terminal columns.
+	const ansiTheme: ThemeLike = {
+		name: "ansi",
+		fg: (_c, t) => t,
+		bold: (t) => t,
+		italic: (t) => t,
+		underline: (t) => t,
+		strikethrough: (t) => t,
+		getFgAnsi: () => "",
+		getBgAnsi: () => "",
+	};
+	const resolver = createCodemodeToolRendererResolver(() => () => undefined);
+	const renderer = resolver("codemode", () => ({
+		renderResult() {
+			const c = new Container();
+			c.addChild(new Text("placeholder", 0, 0));
+			return c;
+		},
+	}))!;
+
+	const comp = renderer.renderResult!(
+		{
+			content: [{ type: "text", text: "ok" }],
+			details: {
+				calls: [
+					{
+						name: "edit",
+						args: JSON.stringify({
+							path: insideAbs,
+							toolSummary: "Wire live !vsync command variants",
+						}),
+						status: "ok",
+						durationMs: 13,
+					},
+					{
+						name: "edit",
+						args: JSON.stringify({
+							path: `${cwd}/worktrees/lani-shield/next-ma/tests/fps_overlay_policy_test.cpp`,
+							toolSummary: "Add unit tests",
+						}),
+						status: "ok",
+						durationMs: 13,
+					},
+				],
+			},
+		},
+		{ expanded: false, isPartial: false },
+		ansiTheme,
+		{ isError: false, state: {}, cwd },
+	) as Container;
+
+	// Even on an 80-column narrow terminal, every `✓ edit <path>  13ms` stays on ONE line!
+	const lines = comp
+		.render(80)
+		.map((l) => l.replace(/\x1b\]8;;[^\x07]*\x07/g, "").trimEnd())
+		.filter((l) => l.length > 0);
+	const editLines = lines.filter((l) => l.startsWith("✓ edit "));
+	assert.equal(editLines.length, 2);
+	for (const line of editLines) {
+		assert.ok(line.length <= 80, `expected single line <= 80 cols, got ${line.length}: ${line}`);
+		assert.match(line, /^✓ edit \S+  13ms$/);
+	}
+	assert.match(editLines[0]!, /runtime_login_send_hook\.cpp/);
+	assert.match(editLines[1]!, /fps_overlay_policy_test\.cpp/);
 });

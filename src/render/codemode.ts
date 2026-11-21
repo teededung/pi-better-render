@@ -8,10 +8,17 @@
  * clickable shortened file paths with `:line-end` ranges, and status/timing).
  */
 import { homedir } from "node:os";
-import { resolve as resolvePath } from "node:path";
+import { isAbsolute, relative as relativePath, resolve as resolvePath } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { ToolRendererResolver, ToolRenderers } from "@earendil-works/pi-coding-agent";
-import { getCapabilities, hyperlink, Spacer, Text } from "@earendil-works/pi-tui";
+import {
+	type Component,
+	getCapabilities,
+	hyperlink,
+	Spacer,
+	Text,
+	visibleWidth,
+} from "@earendil-works/pi-tui";
 import { state } from "../state.ts";
 import type { Highlighter, ThemeLike } from "../style.ts";
 import {
@@ -100,6 +107,14 @@ function formatCost(cost: number): string {
 	return `$${cost >= 0.01 ? cost.toFixed(2) : cost.toPrecision(2)}`;
 }
 
+function expandHome(rawPath: string): string {
+	const home = homedir();
+	if (!home) return rawPath;
+	if (rawPath === "~") return home;
+	if (rawPath.startsWith("~/")) return `${home}${rawPath.slice(1)}`;
+	return rawPath;
+}
+
 function shortenHome(rawPath: string): string {
 	const home = homedir();
 	if (!home) return rawPath;
@@ -108,11 +123,97 @@ function shortenHome(rawPath: string): string {
 	return rawPath;
 }
 
-function formatStyledPath(rawPath: string, theme: ThemeLike, cwd?: string): string {
-	const styled = fg(theme, "accent", "text", shortenHome(rawPath));
+/**
+ * Middle-truncate a display path to fit within `maxWidth` terminal columns while
+ * preserving the leading anchor (`~` or top-level folder) and as many trailing
+ * parent directories + filename as fit.
+ */
+export function middleTruncatePath(displayPath: string, maxWidth: number): string {
+	if (maxWidth <= 0 || visibleWidth(displayPath) <= maxWidth) return displayPath;
+	if (maxWidth <= 2) return displayPath.slice(0, maxWidth);
+
+	const parts = displayPath.split("/");
+	if (parts.length >= 3) {
+		const head = parts[0]!;
+		const tailParts = [parts[parts.length - 1]!];
+		const prefixWithEllipsis = `${head}/…/`;
+		const prefixWidth = visibleWidth(prefixWithEllipsis);
+
+		if (prefixWidth + visibleWidth(tailParts[0]!) <= maxWidth) {
+			for (let i = parts.length - 2; i >= 1; i--) {
+				const candidateTail = [parts[i]!, ...tailParts].join("/");
+				if (prefixWidth + visibleWidth(candidateTail) <= maxWidth) {
+					tailParts.unshift(parts[i]!);
+				} else {
+					break;
+				}
+			}
+			return `${prefixWithEllipsis}${tailParts.join("/")}`;
+		}
+
+		const tailOnly = `…/${tailParts[0]!}`;
+		if (visibleWidth(tailOnly) <= maxWidth) return tailOnly;
+
+		const chars = Array.from(tailParts[0]!);
+		let out = "";
+		for (let i = chars.length - 1; i >= 0; i--) {
+			const next = `${chars[i]}${out}`;
+			if (visibleWidth(`…${next}`) > maxWidth) break;
+			out = next;
+		}
+		return `…${out}`;
+	}
+
+	const chars = Array.from(displayPath);
+	const half = Math.max(1, Math.floor((maxWidth - 1) / 2));
+	const start = chars.slice(0, half).join("");
+	const endBudget = Math.max(1, maxWidth - visibleWidth(start) - 1);
+	let end = "";
+	for (let i = chars.length - 1; i >= half; i--) {
+		const next = `${chars[i]}${end}`;
+		if (visibleWidth(next) > endBudget) break;
+		end = next;
+	}
+	return `${start}…${end}`;
+}
+
+/**
+ * Shorten a file path for display: prefer a `cwd`-relative path when the target
+ * lives inside `cwd`, otherwise shorten `$HOME` to `~`. Optionally middle-truncate
+ * to fit `maxWidth` columns while still resolving the full absolute path for links.
+ */
+export function shortenDisplayPath(rawPath: string, cwd?: string, maxWidth?: number): string {
+	const expanded = expandHome(rawPath);
+	let display: string;
+	if (cwd) {
+		const absCwd = resolvePath(expandHome(cwd));
+		const absTarget = resolvePath(absCwd, expanded);
+		const rel = relativePath(absCwd, absTarget);
+		if (rel === "") {
+			display = ".";
+		} else if (!rel.startsWith("..") && !isAbsolute(rel)) {
+			display = rel.replace(/\\/g, "/");
+		} else {
+			display = shortenHome(absTarget);
+		}
+	} else {
+		display = shortenHome(rawPath);
+	}
+	return maxWidth !== undefined ? middleTruncatePath(display, maxWidth) : display;
+}
+
+function formatStyledPath(
+	rawPath: string,
+	theme: ThemeLike,
+	cwd?: string,
+	maxWidth?: number,
+): string {
+	const display = shortenDisplayPath(rawPath, cwd, maxWidth);
+	const styled = fg(theme, "accent", "text", display);
 	try {
 		if (!getCapabilities().hyperlinks) return styled;
-		const abs = cwd ? resolvePath(cwd, rawPath) : resolvePath(rawPath);
+		const expanded = expandHome(rawPath);
+		const abs = cwd ? resolvePath(expandHome(cwd), expanded) : resolvePath(expanded);
 		return hyperlink(styled, pathToFileURL(abs).href);
 	} catch {
 		return styled;
@@ -711,6 +812,7 @@ export function formatSingleNestedCallBody(
 	theme: ThemeLike,
 	highlight?: Highlighter,
 	cwd?: string,
+	lineBudget?: number,
 ): string {
 	const cleanName = rawName.startsWith("tools.") ? rawName.slice("tools.".length) : rawName;
 
@@ -754,7 +856,11 @@ export function formatSingleNestedCallBody(
 		if (p) {
 			const range = formatReadRange(pickNum(args, ["offset"]), pickNum(args, ["limit"]));
 			const rangeStyled = range ? fg(theme, "warning", "syntaxNumber", range) : "";
-			return `${theme.bold(fg(theme, "toolTitle", "text", "read"))} ${formatStyledPath(p, theme, cwd)}${rangeStyled}`;
+			const pathBudget =
+				lineBudget !== undefined
+					? Math.max(12, lineBudget - visibleWidth("read ") - visibleWidth(range))
+					: undefined;
+			return `${theme.bold(fg(theme, "toolTitle", "text", "read"))} ${formatStyledPath(p, theme, cwd, pathBudget)}${rangeStyled}`;
 		}
 	}
 
@@ -762,11 +868,13 @@ export function formatSingleNestedCallBody(
 		const p = pickStr(args, ["path", "file_path"]);
 		if (p) {
 			const editsCount = Array.isArray(args.edits) ? args.edits.length : 0;
-			const suffix =
-				cleanName === "edit" && editsCount > 1
-					? fg(theme, "muted", "dim", ` (${editsCount} edits)`)
-					: "";
-			return `${theme.bold(fg(theme, "toolTitle", "text", cleanName))} ${formatStyledPath(p, theme, cwd)}${suffix}`;
+			const plainSuffix = cleanName === "edit" && editsCount > 1 ? ` (${editsCount} edits)` : "";
+			const suffix = plainSuffix ? fg(theme, "muted", "dim", plainSuffix) : "";
+			const pathBudget =
+				lineBudget !== undefined
+					? Math.max(12, lineBudget - visibleWidth(`${cleanName} `) - visibleWidth(plainSuffix))
+					: undefined;
+			return `${theme.bold(fg(theme, "toolTitle", "text", cleanName))} ${formatStyledPath(p, theme, cwd, pathBudget)}${suffix}`;
 		}
 	}
 
@@ -786,8 +894,15 @@ export function formatSingleNestedCallBody(
 		if (query || searchPath) {
 			const qPart = query ? ` ${fg(theme, "accent", "text", `"${query}"`)}` : "";
 			const cPart = constraints ? ` ${fg(theme, "warning", "muted", constraints)}` : "";
+			const fixedWidth =
+				visibleWidth(displayName) +
+				(query ? visibleWidth(` "${query}"`) : 0) +
+				(constraints ? visibleWidth(` ${constraints}`) : 0) +
+				visibleWidth(" in ");
+			const pathBudget =
+				lineBudget !== undefined ? Math.max(12, lineBudget - fixedWidth) : undefined;
 			const pPart = searchPath
-				? `${fg(theme, "muted", "toolOutput", " in ")}${formatStyledPath(searchPath, theme, cwd)}`
+				? `${fg(theme, "muted", "toolOutput", " in ")}${formatStyledPath(searchPath, theme, cwd, pathBudget)}`
 				: "";
 			return `${label}${qPart}${cPart}${pPart}`;
 		}
@@ -829,6 +944,7 @@ export function formatCodemodeCalls(
 		extractedCalls?: readonly ExtractedCodeCall[];
 		hintLine?: string;
 		cwd?: string;
+		width?: number;
 	},
 ): string {
 	const extracted = options?.extractedCalls ?? [];
@@ -844,6 +960,25 @@ export function formatCodemodeCalls(
 
 	const renderedItems = shown.map(({ call, mergedArgs }) => {
 		const summary = extractToolSummaryArg(mergedArgs);
+		const duration = formatDurationMs(call.durationMs);
+		const costStr = call.cost ? formatCost(call.cost) : "";
+		const metaParts: string[] = [];
+		const plainMetaParts: string[] = [];
+		if (duration) {
+			metaParts.push(fg(theme, "dim", "muted", duration));
+			plainMetaParts.push(duration);
+		}
+		if (costStr) {
+			metaParts.push(fg(theme, "syntaxNumber", "muted", costStr));
+			plainMetaParts.push(costStr);
+		}
+		const metaSuffix = metaParts.length > 0 ? `  ${metaParts.join(" ")}` : "";
+		const plainMetaSuffix = plainMetaParts.length > 0 ? `  ${plainMetaParts.join(" ")}` : "";
+		// Reserve columns for `"✓ "` status prefix + trailing duration/cost so path calls stay on one line.
+		const lineBudget =
+			options?.width !== undefined
+				? Math.max(20, options.width - 2 - visibleWidth(plainMetaSuffix))
+				: undefined;
 		const body = formatSingleNestedCallBody(
 			call.name,
 			mergedArgs,
@@ -852,12 +987,8 @@ export function formatCodemodeCalls(
 			theme,
 			highlight,
 			options?.cwd,
+			lineBudget,
 		);
-		const duration = formatDurationMs(call.durationMs);
-		const metaParts: string[] = [];
-		if (duration) metaParts.push(fg(theme, "dim", "muted", duration));
-		if (call.cost) metaParts.push(fg(theme, "syntaxNumber", "muted", formatCost(call.cost)));
-		const metaSuffix = metaParts.length > 0 ? `  ${metaParts.join(" ")}` : "";
 
 		const bodyLines = body.split("\n");
 		bodyLines[bodyLines.length - 1] = `${bodyLines[bodyLines.length - 1]}${metaSuffix}`;
@@ -963,6 +1094,23 @@ function isTimerTextComponent(comp: unknown): boolean {
 	return TIMER_TEXT_RE.test(plain);
 }
 
+class CodemodeCallsComponent implements Component {
+	private cachedWidth?: number;
+	private cachedLines?: string[];
+	constructor(private readonly renderText: (width: number) => string) {}
+	invalidate(): void {
+		this.cachedWidth = undefined;
+		this.cachedLines = undefined;
+	}
+	render(width: number): string[] {
+		if (this.cachedLines && this.cachedWidth === width) return this.cachedLines;
+		const lines = [...new Text(this.renderText(width), 0, 0).render(width)];
+		this.cachedWidth = width;
+		this.cachedLines = lines;
+		return lines;
+	}
+}
+
 /**
  * Create a Pi `ToolRendererResolver` that renders `codemode` as a clean container
  * frame holding individual single-tool-call items (with per-call `toolSummary`s),
@@ -1061,19 +1209,21 @@ export function createCodemodeToolRendererResolver(
 
 							const nextChildren: unknown[] = [];
 							if (calls.length > 0) {
-								const callsText = formatCodemodeCalls(
-									calls,
-									Boolean(options?.expanded),
-									theme as ThemeLike,
-									getHighlighter(),
-									{
-										extractedCalls: renderState?.extractedCalls,
-										hintLine,
-										cwd,
-									},
-								);
+								const expanded = Boolean(options?.expanded);
+								const extractedCalls = renderState?.extractedCalls;
+								const hl = getHighlighter();
+								const themeLike = theme as ThemeLike;
 								nextChildren.push(new Spacer(1));
-								nextChildren.push(new Text(callsText, 0, 0));
+								nextChildren.push(
+									new CodemodeCallsComponent((width) =>
+										formatCodemodeCalls(calls, expanded, themeLike, hl, {
+											extractedCalls,
+											hintLine,
+											cwd,
+											width,
+										}),
+									),
+								);
 							}
 
 							// Suppress normal script return output (`tuiText` / JSON blobs); only surface script crashes.
